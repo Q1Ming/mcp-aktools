@@ -13,3 +13,5 @@ wheels/
 .cache
 .DS_Store
 output.txt
+.claude
+CLAUDE.md
