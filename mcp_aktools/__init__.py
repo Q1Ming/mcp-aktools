@@ -622,20 +622,29 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         # 如果没有配置API_KEY，跳过验证（向后兼容）
         if not self.api_key:
+            _LOGGER.info("API Key验证已启用，但未配置密钥，跳过验证")
             return await call_next(request)
 
         # 从请求头获取API Key
         request_api_key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
 
+        # 打印请求中的 API Key 信息（不显示完整值）
+        if request_api_key:
+            masked_req_key = request_api_key[:8] + "..." if len(request_api_key) > 8 else "..."
+            _LOGGER.info(f"收到请求，包含 x-api-key: {masked_req_key} (长度: {len(request_api_key)}), 来自: {request.client.host}")
+        else:
+            _LOGGER.warning(f"收到请求，未包含 x-api-key 头, 来自: {request.client.host}")
+
         # 验证API Key
         if not request_api_key or request_api_key != self.api_key:
-            _LOGGER.warning(f"无效的API Key访问: {request.client.host}")
+            _LOGGER.warning(f"API Key验证失败: {request.client.host}")
             return JSONResponse(
                 status_code=401,
                 content={"detail": "无效的API Key"},
                 headers={"WWW-Authenticate": 'APIKey realm="MCP Server"'},
             )
 
+        _LOGGER.info(f"API Key验证成功: {request.client.host}")
         return await call_next(request)
 
 
@@ -643,6 +652,13 @@ def main():
     mode = os.getenv("TRANSPORT")
     port = int(os.getenv("PORT", 0)) or 80
     api_key = os.getenv("API_KEY")
+
+    # 打印环境变量中的 API Key（只显示前8位）
+    if api_key:
+        masked_key = api_key[:8] + "..." if len(api_key) > 8 else "..."
+        _LOGGER.info(f"从环境变量读取 API_KEY: {masked_key} (长度: {len(api_key)})")
+    else:
+        _LOGGER.warning("环境变量中未找到 API_KEY")
 
     parser = argparse.ArgumentParser(description="AkTools MCP Server")
     parser.add_argument("--http", action="store_true", help="Use streamable HTTP mode instead of stdio")
