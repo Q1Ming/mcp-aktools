@@ -17,6 +17,23 @@ from .cache import CacheKey
 _LOGGER = logging.getLogger(__name__)
 _LOGGER.setLevel(logging.INFO)
 
+# ==================== 诊断日志：程序启动 ====================
+_LOGGER.info("=" * 60)
+_LOGGER.info("MCP AKTOOLS 服务启动")
+_LOGGER.info("=" * 60)
+_LOGGER.info(f"Python 版本: {__import__('sys').version}")
+_LOGGER.info(f"当前工作目录: {os.getcwd()}")
+_LOGGER.info(f"所有环境变量:")
+for key, value in sorted(os.environ.items()):
+    if 'KEY' in key.upper() or 'SECRET' in key.upper() or 'TOKEN' in key.upper():
+        # 对敏感信息打码
+        masked_value = value[:4] + "****" if value else "None"
+        _LOGGER.info(f"  {key} = {masked_value}")
+    else:
+        _LOGGER.info(f"  {key} = {value}")
+_LOGGER.info("=" * 60)
+# ==========================================================
+
 mcp = FastMCP(name="mcp-aktools", version="0.1.13")
 
 field_symbol = Field(description="股票代码")
@@ -25,6 +42,10 @@ field_market = Field("sh", description="股票市场，仅支持: sh(上证), sz
 OKX_BASE_URL = os.getenv("OKX_BASE_URL") or "https://www.okx.com"
 BINANCE_BASE_URL = os.getenv("BINANCE_BASE_URL") or "https://www.binance.com"
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10) AppleWebKit/537.36 Chrome/139"
+
+_LOGGER.info(f"OKX_BASE_URL = {OKX_BASE_URL}")
+_LOGGER.info(f"BINANCE_BASE_URL = {BINANCE_BASE_URL}")
+_LOGGER.info("=" * 60)
 
 
 @mcp.tool(
@@ -618,11 +639,32 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, api_key: str | None):
         super().__init__(app)
         self.api_key = api_key
+        # ==================== 诊断日志：中间件初始化 ====================
+        _LOGGER.info("=" * 60)
+        _LOGGER.info("APIKeyMiddleware 初始化")
+        _LOGGER.info("=" * 60)
+        if api_key:
+            _LOGGER.info(f"[DIAG] 中间件配置的 api_key: {type(api_key)} 长度={len(api_key)}")
+            _LOGGER.info(f"[DIAG] 中间件已启用，将验证所有请求")
+        else:
+            _LOGGER.warning(f"[DIAG] 中间件 api_key 为 None/空，将跳过验证")
+        _LOGGER.info("=" * 60)
+        # ==========================================================
 
     async def dispatch(self, request, call_next):
+        # ==================== 诊断日志：请求处理 ====================
+        _LOGGER.info("=" * 60)
+        _LOGGER.info(f"[DIAG] 收到新请求")
+        _LOGGER.info(f"[DIAG] 客户端: {request.client.host}")
+        _LOGGER.info(f"[DIAG] 方法: {request.method}")
+        _LOGGER.info(f"[DIAG] URL: {request.url}")
+        _LOGGER.info(f"[DIAG] 请求头列表: {list(request.headers.keys())}")
+        # ==========================================================
+
         # 如果没有配置API_KEY，跳过验证（向后兼容）
         if not self.api_key:
-            _LOGGER.info("API Key验证已启用，但未配置密钥，跳过验证")
+            _LOGGER.warning(f"[DIAG] ⚠️  中间件未配置 api_key，直接放行")
+            _LOGGER.info("=" * 60)
             return await call_next(request)
 
         # 从请求头获取API Key
@@ -631,34 +673,55 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         # 打印请求中的 API Key 信息（不显示完整值）
         if request_api_key:
             masked_req_key = request_api_key[:8] + "..." if len(request_api_key) > 8 else "..."
-            _LOGGER.info(f"收到请求，包含 x-api-key: {masked_req_key} (长度: {len(request_api_key)}), 来自: {request.client.host}")
+            _LOGGER.info(f"[DIAG] ✅ 请求包含 x-api-key: {masked_req_key} (长度: {len(request_api_key)})")
         else:
-            _LOGGER.warning(f"收到请求，未包含 x-api-key 头, 来自: {request.client.host}")
+            _LOGGER.error(f"[DIAG] ❌ 请求未包含 x-api-key 头")
+
+        _LOGGER.info(f"[DIAG] 开始验证 API Key...")
+        _LOGGER.info(f"[DIAG] 配置的 api_key (前8位): {self.api_key[:8] + '...' if self.api_key else 'None'}")
+        _LOGGER.info(f"[DIAG] 请求中的 api_key (前8位): {request_api_key[:8] + '...' if request_api_key else 'None'}")
+        _LOGGER.info(f"[DIAG] 两者是否相等: {request_api_key == self.api_key if request_api_key else False}")
 
         # 验证API Key
         if not request_api_key or request_api_key != self.api_key:
-            _LOGGER.warning(f"API Key验证失败: {request.client.host}")
+            _LOGGER.error(f"[DIAG] ❌ API Key验证失败!")
+            _LOGGER.error(f"[DIAG]    原因: {'未提供' if not request_api_key else '不匹配'}")
+            _LOGGER.info("=" * 60)
             return JSONResponse(
                 status_code=401,
                 content={"detail": "无效的API Key"},
                 headers={"WWW-Authenticate": 'APIKey realm="MCP Server"'},
             )
 
-        _LOGGER.info(f"API Key验证成功: {request.client.host}")
+        _LOGGER.info(f"[DIAG] ✅ API Key验证成功!")
+        _LOGGER.info("=" * 60)
         return await call_next(request)
 
 
 def main():
+    _LOGGER.info("=" * 60)
+    _LOGGER.info("主函数 main() 开始执行")
+    _LOGGER.info("=" * 60)
+
     mode = os.getenv("TRANSPORT")
     port = int(os.getenv("PORT", 0)) or 80
     api_key = os.getenv("API_KEY")
 
-    # 打印环境变量中的 API Key（只显示前8位）
+    # ==================== 诊断日志：API_KEY 读取 ====================
+    _LOGGER.info(f"[DIAG] 准备读取 API_KEY 环境变量")
+    _LOGGER.info(f"[DIAG] os.getenv('API_KEY') 原始返回值: {type(api_key)} {api_key}")
+    _LOGGER.info(f"[DIAG] 'API_KEY' in os.environ: {'API_KEY' in os.environ}")
+
     if api_key:
         masked_key = api_key[:8] + "..." if len(api_key) > 8 else "..."
-        _LOGGER.info(f"从环境变量读取 API_KEY: {masked_key} (长度: {len(api_key)})")
+        _LOGGER.info(f"[DIAG] ✅ API_KEY 读取成功: {masked_key} (长度: {len(api_key)})")
     else:
-        _LOGGER.warning("环境变量中未找到 API_KEY")
+        _LOGGER.error(f"[DIAG] ❌ API_KEY 读取失败: 值为 None 或空字符串")
+        _LOGGER.error(f"[DIAG] 所有包含 'API_KEY' 的环境变量:")
+        for key, value in os.environ.items():
+            if 'API_KEY' in key.upper():
+                _LOGGER.error(f"[DIAG]   {key} = {value[:10] if value else 'None'}...")
+    # ==========================================================
 
     parser = argparse.ArgumentParser(description="AkTools MCP Server")
     parser.add_argument("--http", action="store_true", help="Use streamable HTTP mode instead of stdio")
@@ -666,7 +729,15 @@ def main():
     parser.add_argument("--port", type=int, default=port, help=f"Port to listen on (default: {port})")
 
     args = parser.parse_args()
+    _LOGGER.info(f"[DIAG] args.http = {args.http}")
+    _LOGGER.info(f"[DIAG] mode = {mode}")
+    _LOGGER.info(f"[DIAG] 是否使用 HTTP 模式: {args.http or mode == 'http'}")
+
     if args.http or mode == "http":
+        _LOGGER.info("=" * 60)
+        _LOGGER.info("进入 HTTP 模式")
+        _LOGGER.info("=" * 60)
+
         app = mcp.http_app()
         app.add_middleware(
             CORSMiddleware,
@@ -678,16 +749,29 @@ def main():
             max_age=86400,
         )
 
+        # ==================== 诊断日志：中间件配置 ====================
+        _LOGGER.info("=" * 60)
+        _LOGGER.info("准备添加 APIKeyMiddleware")
         # 添加API Key验证中间件（如果有配置）
         if api_key:
-            _LOGGER.info("API Key验证已启用")
+            _LOGGER.info(f"[DIAG] ✅ api_key 已配置 (长度: {len(api_key)}), 启用中间件")
             app.add_middleware(APIKeyMiddleware, api_key=api_key)
         else:
-            _LOGGER.warning("⚠️  警告：未设置API_KEY环境变量，服务正在公开运行！")
+            _LOGGER.error("[DIAG] ❌ api_key 为 None/空，跳过中间件")
+            _LOGGER.error("[DIAG] ⚠️  警告：服务将公开运行，无需认证！")
+        _LOGGER.info("=" * 60)
+        # ==========================================================
 
+        _LOGGER.info(f"[DIAG] 启动 HTTP 服务，host={args.host}, port={args.port}")
         mcp.run(transport="http", host=args.host, port=args.port)
     else:
+        _LOGGER.info("=" * 60)
+        _LOGGER.info("进入 STDIO 模式")
+        _LOGGER.info("=" * 60)
         mcp.run()
 
 if __name__ == "__main__":
+    _LOGGER.info("=" * 60)
+    _LOGGER.info("程序入口: if __name__ == '__main__'")
+    _LOGGER.info("=" * 60)
     main()
