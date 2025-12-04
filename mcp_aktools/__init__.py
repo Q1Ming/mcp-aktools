@@ -10,6 +10,8 @@ from fastmcp import FastMCP
 from pydantic import Field
 from datetime import datetime, timedelta
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 from .cache import CacheKey
 
 _LOGGER = logging.getLogger(__name__)
@@ -610,9 +612,38 @@ def add_technical_indicators(df, clos, lows, high):
     df["BOLL.L"] = df["BOLL.M"] - 2 * std
 
 
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """API Key验证中间件"""
+
+    def __init__(self, app, api_key: str | None):
+        super().__init__(app)
+        self.api_key = api_key
+
+    async def dispatch(self, request, call_next):
+        # 如果没有配置API_KEY，跳过验证（向后兼容）
+        if not self.api_key:
+            return await call_next(request)
+
+        # 从请求头获取API Key
+        request_api_key = request.headers.get("x-api-key") or request.headers.get("X-API-Key")
+
+        # 验证API Key
+        if not request_api_key or request_api_key != self.api_key:
+            _LOGGER.warning(f"无效的API Key访问: {request.client.host}")
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "无效的API Key"},
+                headers={"WWW-Authenticate": 'APIKey realm="MCP Server"'},
+            )
+
+        return await call_next(request)
+
+
 def main():
     mode = os.getenv("TRANSPORT")
     port = int(os.getenv("PORT", 0)) or 80
+    api_key = os.getenv("API_KEY")
+
     parser = argparse.ArgumentParser(description="AkTools MCP Server")
     parser.add_argument("--http", action="store_true", help="Use streamable HTTP mode instead of stdio")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
@@ -630,6 +661,14 @@ def main():
             expose_headers=["mcp-session-id", "mcp-protocol-version"],
             max_age=86400,
         )
+
+        # 添加API Key验证中间件（如果有配置）
+        if api_key:
+            _LOGGER.info("API Key验证已启用")
+            app.add_middleware(APIKeyMiddleware, api_key=api_key)
+        else:
+            _LOGGER.warning("⚠️  警告：未设置API_KEY环境变量，服务正在公开运行！")
+
         mcp.run(transport="http", host=args.host, port=args.port)
     else:
         mcp.run()
